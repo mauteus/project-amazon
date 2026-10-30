@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Amazon Clone – Vue + Tailwind</title>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://cdn.jsdelivr.net/npm/vue@3.4.21/dist/vue.global.prod.js"></script>
+<script>tailwind.config={theme:{extend:{colors:{amz:{dark:'#131921',nav:'#232f3e',orange:'#febd69',btn:'#f0c14b',link:'#007185',bg:'#eaeded'}}}}};</script>
+<style>
+[v-cloak]{display:none}html{scroll-behavior:smooth}
+.fade-enter-active,.fade-leave-active{transition:opacity .35s}.fade-enter-from,.fade-leave-to{opacity:0}
+.pop-enter-active{transition:all .25s}.pop-enter-from{opacity:0;transform:scale(.95)}
+.no-scrollbar::-webkit-scrollbar{display:none}
+.card{transition:transform .2s,box-shadow .2s}.card:hover{transform:translateY(-4px);box-shadow:0 8px 20px rgba(0,0,0,.15)}
+</style>
+</head>
+<body class="bg-amz-bg text-gray-900 font-sans">
+<div id="app" v-cloak>
+
+<!-- HEADER -->
+<header class="bg-amz-dark text-white sticky top-0 z-40">
+  <div class="flex items-center gap-2 px-3 py-2">
+    <a href="#" @click.prevent="reset" class="px-2 py-1 border border-transparent hover:border-white rounded">
+      <span class="text-2xl font-bold">amazon<span class="text-amz-orange">.com.br</span></span></a>
+    <button @click="cepOpen=true" class="hidden md:block px-2 py-1 border border-transparent hover:border-white rounded text-xs text-left leading-tight">
+      <span class="text-gray-300">Enviar para</span><br><b class="text-sm">📍 {{ cep||'Informe o CEP' }}</b></button>
+
+    <form class="relative flex flex-1 h-10 rounded focus-within:ring-2 focus-within:ring-amz-orange" @submit.prevent="goCatalog">
+      <select v-model="category" class="hidden sm:block bg-gray-100 text-gray-700 text-xs px-2 rounded-l border-r outline-none">
+        <option v-for="c in categories">{{ c }}</option></select>
+      <input v-model="query" @focus="sugOpen=true" @blur="closeSug" type="text" placeholder="Pesquisa Amazon.com.br" class="flex-1 px-3 text-gray-900 outline-none min-w-0 rounded-l sm:rounded-none">
+      <button v-if="query" type="button" @click="query=''" class="bg-white text-gray-400 px-2">✕</button>
+      <button class="bg-amz-orange hover:bg-amber-400 px-4 text-amz-dark rounded-r">🔍</button>
+      <ul v-if="sugOpen && suggestions.length" class="absolute top-full inset-x-0 bg-white text-gray-900 shadow-xl z-50 rounded-b">
+        <li v-for="s in suggestions" :key="s.id" @mousedown.prevent="openProduct(s)" class="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm">{{ s.emoji }} {{ s.name }}</li>
+      </ul>
+    </form>
+
+    <button @click="user?logout():(loginOpen=true)" class="hidden md:block px-2 py-1 border border-transparent hover:border-white rounded text-xs text-left leading-tight">
+      Olá, {{ user||'faça seu login' }}<br><b class="text-sm">{{ user?'Sair':'Contas e Listas ▾' }}</b></button>
+    <button @click="onlyFav=!onlyFav;goCatalog()" class="hidden lg:block px-2 py-1 border border-transparent hover:border-white rounded text-xs text-left leading-tight">
+      Lista de<br><b class="text-sm">❤️ Favoritos ({{ fav.length }})</b></button>
+    <button @click="cartOpen=true" class="flex items-end px-2 py-1 border border-transparent hover:border-white rounded">
+      <span class="relative text-3xl" :class="bump&&'animate-bounce'">🛒<span class="absolute -top-1 left-3 text-amz-orange font-bold text-base">{{ cartCount }}</span></span>
+      <b class="hidden sm:inline text-sm ml-1">Carrinho</b></button>
+  </div>
+  <nav class="bg-amz-nav flex items-center gap-1 px-3 text-sm overflow-x-auto no-scrollbar whitespace-nowrap">
+    <button @click="reset" class="px-2 py-1.5 border border-transparent hover:border-white rounded font-bold">☰ Todos</button>
+    <button v-for="c in categories.slice(1)" :key="c" @click="pick(c)"
+      :class="['px-2 py-1.5 border rounded hover:border-white', category===c?'border-white':'border-transparent']">{{ c }}</button>
+    <button @click="sort='off';onlyOffer=!onlyOffer;goCatalog()" :class="['px-2 py-1.5 border rounded hover:border-white', onlyOffer?'border-white':'border-transparent']">🔥 Ofertas do Dia</button>
+  </nav>
+</header>
+
+<!-- HERO -->
+<section v-show="!filtering" class="relative h-64 md:h-96 overflow-hidden" @mouseenter="paused=true" @mouseleave="paused=false">
+  <transition name="fade" mode="out-in">
+    <div :key="cur" :class="['absolute inset-0 flex items-center px-10 md:px-24 text-white bg-gradient-to-br',slides[cur].bg]">
+      <div class="max-w-xl"><p class="text-6xl mb-2">{{ slides[cur].emoji }}</p>
+        <h2 class="text-2xl md:text-4xl font-bold">{{ slides[cur].title }}</h2>
+        <p class="mt-2 opacity-90">{{ slides[cur].text }}</p>
+        <button @click="pick(slides[cur].cat)" class="mt-4 bg-amz-btn text-gray-900 rounded-full px-6 py-2 text-sm hover:bg-yellow-500">Ver ofertas</button></div>
+    </div></transition>
+  <button @click="step(-1)" class="absolute left-0 top-0 h-48 w-14 text-4xl text-white/80 hover:bg-black/10 z-10">‹</button>
+  <button @click="step(1)" class="absolute right-0 top-0 h-48 w-14 text-4xl text-white/80 hover:bg-black/10 z-10">›</button>
+  <div class="absolute bottom-16 left-1/2 -translate-x-1/2 flex gap-2 z-10">
+    <button v-for="(s,i) in slides" @click="cur=i" :class="['h-2 rounded-full transition-all',i===cur?'w-6 bg-white':'w-2 bg-white/50']"></button></div>
+  <div class="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-amz-bg to-transparent"></div>
+</section>
+
+<main :class="['relative z-10 px-3 md:px-6 pb-6 max-w-[1500px] mx-auto', filtering?'pt-4':'-mt-24 md:-mt-36']">
+
+  <!-- CATEGORY CARDS -->
+  <div v-show="!filtering" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <article v-for="c in cards" :key="c.title" class="bg-white p-4 flex flex-col">
+      <h3 class="text-xl font-bold mb-3">{{ c.title }}</h3>
+      <div class="grid grid-cols-2 gap-3 flex-1">
+        <button v-for="i in c.items" @click="pick(i.cat)" class="group text-left">
+          <div :class="['h-24 flex items-center justify-center text-5xl rounded transition group-hover:scale-105',i.bg]">{{ i.emoji }}</div>
+          <p class="text-xs mt-1 group-hover:text-orange-700">{{ i.name }}</p></button></div>
+      <button @click="pick(c.cat)" class="text-sm text-amz-link hover:text-orange-700 hover:underline mt-4 text-left">{{ c.link }}</button>
+    </article>
+  </div>
+
+  <!-- DEAL OF THE DAY -->
+  <section v-show="!filtering" class="mt-4 bg-white p-4 flex flex-wrap items-center gap-4">
+    <h2 class="text-xl font-bold">⚡ Oferta Relâmpago</h2>
+    <span class="bg-red-600 text-white font-mono px-3 py-1 rounded">{{ countdown }}</span>
+    <button @click="openProduct(products[2])" class="text-amz-link hover:underline text-sm">{{ products[2].emoji }} {{ products[2].name }} – {{ brl(products[2].price) }}</button>
+  </section>
+
+  <!-- CATALOG -->
+  <section id="catalogo" class="bg-white mt-4 p-4 scroll-mt-32">
+    <div class="flex flex-wrap items-center gap-3 mb-4">
+      <h2 class="text-xl font-bold flex-1">{{ title }} <span class="text-sm font-normal text-gray-500">({{ filtered.length }})</span></h2>
+      <label class="text-sm">Preço até <b>{{ brl(maxPrice) }}</b>
+        <input type="range" min="100" max="3000" step="50" v-model.number="maxPrice" class="align-middle ml-1 accent-amber-500"></label>
+      <select v-model="sort" class="border rounded px-2 py-1 text-sm bg-gray-100">
+        <option value="off">Relevância</option><option value="asc">Menor preço</option><option value="desc">Maior preço</option><option value="rate">Melhor avaliados</option></select>
+      <button v-if="filtering" @click="reset" class="text-sm text-amz-link hover:underline">Limpar filtros</button>
+    </div>
+    <p v-if="!filtered.length" class="py-10 text-center text-gray-500">Nenhum produto encontrado 😕</p>
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
+      <article v-for="p in filtered" :key="p.id" class="card border rounded p-3 flex flex-col bg-white relative">
+        <button @click="toggleFav(p)" class="absolute right-2 top-2 text-xl z-10" :title="isFav(p)?'Remover':'Favoritar'">{{ isFav(p)?'❤️':'🤍' }}</button>
+        <button @click="openProduct(p)" class="h-32 bg-gray-100 rounded flex items-center justify-center text-6xl">{{ p.emoji }}</button>
+        <span v-if="p.old" class="self-start mt-2 bg-red-600 text-white text-xs px-1.5 rounded">-{{ Math.round((1-p.price/p.old)*100) }}%</span>
+        <button @click="openProduct(p)" class="text-sm mt-1 text-left line-clamp-2 text-amz-link hover:text-orange-700">{{ p.name }}</button>
+        <p class="text-yellow-500 text-sm">{{ stars(p.rating) }} <span class="text-amz-link text-xs">{{ p.reviews.toLocaleString('pt-BR') }}</span></p>
+        <p class="text-xl font-medium">{{ brl(p.price) }}</p>
+        <p v-if="p.old" class="text-xs text-gray-500 line-through">{{ brl(p.old) }}</p>
+        <button @click="add(p)" class="mt-auto bg-amz-btn hover:bg-yellow-500 active:scale-95 transition rounded-full text-xs py-1.5 mt-2">Adicionar ao carrinho</button>
+      </article>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <button @click="scrollTo({top:0})" class="w-full bg-[#37475a] hover:bg-[#485769] text-white text-sm py-4">Voltar ao início</button>
+  <div class="bg-amz-nav text-gray-300 text-center text-xs py-8">Projeto de estudo – não afiliado à Amazon. © 2026</div>
+</footer>
+
+<!-- CART DRAWER -->
+<transition name="fade"><div v-if="cartOpen" class="fixed inset-0 bg-black/50 z-50" @click.self="cartOpen=false">
+  <aside class="absolute right-0 top-0 h-full w-full max-w-md bg-white p-5 flex flex-col">
+    <div class="flex justify-between items-center mb-3"><h3 class="text-xl font-bold">Seu carrinho ({{ cartCount }})</h3><button @click="cartOpen=false" class="text-2xl">✕</button></div>
+    <p v-if="!cart.length" class="text-gray-500 mt-10 text-center">Seu carrinho está vazio 🛒</p>
+    <ul class="flex-1 overflow-auto divide-y">
+      <li v-for="i in cart" :key="i.id" class="py-3 flex items-center gap-3 text-sm">
+        <span class="text-4xl">{{ i.emoji }}</span>
+        <div class="flex-1"><p class="line-clamp-2">{{ i.name }}</p><b>{{ brl(i.price*i.qty) }}</b>
+          <button @click="remove(i)" class="block text-xs text-amz-link hover:underline">Excluir</button></div>
+        <div class="flex items-center border rounded-full"><button class="px-2" @click="dec(i)">−</button><span>{{ i.qty }}</span><button class="px-2" @click="add(i,true)">+</button></div>
+      </li></ul>
+    <div v-if="cart.length" class="pt-3 border-t">
+      <p class="text-sm text-green-700" v-if="cartTotal>=199">✔ Seu pedido tem frete GRÁTIS</p>
+      <p class="text-sm text-gray-600" v-else>Faltam {{ brl(199-cartTotal) }} para frete grátis</p>
+      <div class="h-1.5 bg-gray-200 rounded mt-1"><div class="h-full bg-green-600 rounded transition-all" :style="{width:Math.min(100,cartTotal/199*100)+'%'}"></div></div>
+      <p class="text-lg mt-2">Subtotal: <b>{{ brl(cartTotal) }}</b></p>
+      <button @click="checkout" class="w-full mt-2 bg-amz-btn hover:bg-yellow-500 rounded-full py-2">Fechar pedido</button>
+      <button @click="cart=[]" class="w-full mt-1 text-xs text-gray-500 hover:underline">Esvaziar carrinho</button></div>
+  </aside></div></transition>
+
+<!-- PRODUCT MODAL -->
+<transition name="fade"><div v-if="sel" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" @click.self="sel=null">
+  <div class="pop-enter-active bg-white rounded-lg max-w-2xl w-full p-6 grid sm:grid-cols-2 gap-6 relative">
+    <button @click="sel=null" class="absolute right-3 top-2 text-2xl">✕</button>
+    <div class="bg-gray-100 rounded flex items-center justify-center text-9xl h-56 sm:h-auto">{{ sel.emoji }}</div>
+    <div>
+      <h3 class="text-lg font-bold">{{ sel.name }}</h3>
+      <p class="text-yellow-500">{{ stars(sel.rating) }} <span class="text-amz-link text-sm">{{ sel.reviews.toLocaleString('pt-BR') }} avaliações</span></p>
+      <p class="text-3xl mt-2">{{ brl(sel.price) }}</p>
+      <p v-if="sel.old" class="text-sm text-gray-500 line-through">{{ brl(sel.old) }}</p>
+      <p class="text-sm mt-2">Entrega <b>GRÁTIS</b> com Prime · <span class="text-green-700">Em estoque</span></p>
+      <label class="block text-sm mt-3">Qtd: <select v-model.number="qty" class="border rounded bg-gray-100 px-2 py-1"><option v-for="n in 10" :value="n">{{ n }}</option></select></label>
+      <button @click="addQty" class="w-full mt-3 bg-amz-btn hover:bg-yellow-500 rounded-full py-2 text-sm">Adicionar ao carrinho</button>
+      <button @click="addQty();cartOpen=true" class="w-full mt-2 bg-orange-400 hover:bg-orange-500 rounded-full py-2 text-sm">Comprar agora</button>
+      <button @click="toggleFav(sel)" class="w-full mt-2 border rounded-full py-1.5 text-sm hover:bg-gray-50">{{ isFav(sel)?'❤️ Nos favoritos':'🤍 Adicionar aos favoritos' }}</button>
+    </div></div></div></transition>
+
+<!-- LOGIN / CEP / ORDER MODAL -->
+<transition name="fade"><div v-if="loginOpen||cepOpen||ordered" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" @click.self="loginOpen=cepOpen=ordered=false">
+  <div class="bg-white rounded-lg w-full max-w-sm p-6">
+    <template v-if="loginOpen"><h3 class="text-2xl mb-3">Fazer login</h3>
+      <input v-model="nameIn" @keyup.enter="login" placeholder="Seu nome" class="w-full border rounded px-3 py-2 mb-2 outline-none focus:ring-2 ring-amz-orange">
+      <input type="password" placeholder="Senha (qualquer)" class="w-full border rounded px-3 py-2 mb-3 outline-none focus:ring-2 ring-amz-orange">
+      <button @click="login" class="w-full bg-amz-btn hover:bg-yellow-500 rounded py-2">Continuar</button></template>
+    <template v-else-if="cepOpen"><h3 class="text-xl mb-3">Escolha o local de entrega</h3>
+      <input v-model="cepIn" maxlength="9" @input="maskCep" @keyup.enter="saveCep" placeholder="00000-000" class="w-full border rounded px-3 py-2 mb-3 outline-none focus:ring-2 ring-amz-orange">
+      <button @click="saveCep" class="w-full bg-amz-btn hover:bg-yellow-500 rounded py-2">Aplicar</button></template>
+    <template v-else><div class="text-center"><p class="text-6xl">✅</p><h3 class="text-xl font-bold mt-2">Pedido confirmado!</h3>
+      <p class="text-sm mt-1">Nº {{ ordered }} · chegando em até 2 dias úteis.</p>
+      <button @click="ordered=''" class="mt-4 bg-amz-btn rounded-full px-6 py-2">Continuar comprando</button></div></template>
+  </div></div></transition>
+
+<transition name="fade"><div v-if="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-4 py-2 rounded-full shadow-lg z-[60] text-sm">{{ toast }}</div></transition>
+</div>
+
+<script>
+const {createApp,ref,computed,watch,onMounted,onBeforeUnmount,nextTick}=Vue;
+const load=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}};
+const save=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}};
+
+createApp({setup(){
+  const categories=['Todos','Eletrônicos','Casa','Moda','Games','Livros','Esportes'];
+  const products=[
+    {id:1,cat:'Eletrônicos',name:'Fone Bluetooth com Cancelamento de Ruído',emoji:'🎧',price:299.9,old:399.9,rating:4.5,reviews:12840},
+    {id:2,cat:'Eletrônicos',name:'Smartwatch Fitness com GPS',emoji:'⌚',price:449,old:599,rating:4.2,reviews:5320},
+    {id:3,cat:'Eletrônicos',name:'Smartphone 128GB Câmera Tripla',emoji:'📱',price:1299,old:1599,rating:4.6,reviews:23410},
+    {id:4,cat:'Eletrônicos',name:'Notebook 15.6" 8GB SSD 256GB',emoji:'💻',price:2799,old:3299,rating:4.3,reviews:3120},
+    {id:5,cat:'Eletrônicos',name:"Caixa de Som Portátil À Prova d'Água",emoji:'🔊',price:199.9,old:null,rating:4.7,reviews:18900},
+    {id:6,cat:'Casa',name:'Fritadeira Elétrica Air Fryer 4L',emoji:'🍳',price:329,old:459,rating:4.8,reviews:41200},
+    {id:7,cat:'Casa',name:'Cadeira de Escritório Ergonômica',emoji:'🪑',price:689,old:null,rating:4.4,reviews:2210},
+    {id:8,cat:'Casa',name:'Kit 3 Vasos Decorativos com Planta',emoji:'🪴',price:119.9,old:149.9,rating:4.6,reviews:980},
+    {id:9,cat:'Moda',name:'Tênis Esportivo Masculino Leve',emoji:'👟',price:219.9,old:299.9,rating:4.3,reviews:15600},
+    {id:10,cat:'Moda',name:'Mochila Impermeável para Notebook',emoji:'🎒',price:139.9,old:null,rating:4.5,reviews:7340},
+    {id:11,cat:'Games',name:'Console Portátil Retrô 10.000 Jogos',emoji:'🎮',price:259,old:349,rating:4.1,reviews:3890},
+    {id:12,cat:'Games',name:'Teclado Mecânico Gamer RGB',emoji:'⌨️',price:249.9,old:329.9,rating:4.5,reviews:9650},
+    {id:13,cat:'Livros',name:'Box Clássicos da Literatura (5 livros)',emoji:'📚',price:89.9,old:129.9,rating:4.9,reviews:6120},
+    {id:14,cat:'Livros',name:'Livro de Produtividade – Best-seller',emoji:'📖',price:39.9,old:null,rating:4.7,reviews:28900},
+    {id:15,cat:'Esportes',name:'Bola de Futebol Profissional',emoji:'⚽',price:119,old:159,rating:4.6,reviews:4410},
+    {id:16,cat:'Esportes',name:'Kit Halteres Ajustáveis 20kg',emoji:'🏋️',price:379,old:499,rating:4.4,reviews:2750},
+  ];
+  const slides=[
+    {emoji:'📦',title:'Frete GRÁTIS com Prime',text:'Milhões de produtos com entrega rápida.',bg:'from-sky-700 to-indigo-900',cat:'Todos'},
+    {emoji:'💻',title:'Semana da Tecnologia',text:'Notebooks, fones e smartphones com desconto.',bg:'from-emerald-600 to-teal-900',cat:'Eletrônicos'},
+    {emoji:'📚',title:'Mês dos Livros',text:'Best-sellers a partir de R$ 39,90.',bg:'from-orange-500 to-rose-800',cat:'Livros'}];
+  const cards=[
+    {title:'Eletrônicos em destaque',link:'Ver mais',cat:'Eletrônicos',items:[{name:'Celulares',emoji:'📱',bg:'bg-blue-50',cat:'Eletrônicos'},{name:'Notebooks',emoji:'💻',bg:'bg-slate-100',cat:'Eletrônicos'},{name:'Fones',emoji:'🎧',bg:'bg-purple-50',cat:'Eletrônicos'},{name:'Relógios',emoji:'⌚',bg:'bg-green-50',cat:'Eletrônicos'}]},
+    {title:'Casa e cozinha',link:'Compre agora',cat:'Casa',items:[{name:'Cozinha',emoji:'🍳',bg:'bg-orange-50',cat:'Casa'},{name:'Móveis',emoji:'🛋️',bg:'bg-amber-50',cat:'Casa'},{name:'Decoração',emoji:'🪴',bg:'bg-lime-50',cat:'Casa'},{name:'Ferramentas',emoji:'🔧',bg:'bg-gray-100',cat:'Casa'}]},
+    {title:'Moda',link:'Descubra mais',cat:'Moda',items:[{name:'Calçados',emoji:'👟',bg:'bg-rose-50',cat:'Moda'},{name:'Roupas',emoji:'👕',bg:'bg-sky-50',cat:'Moda'},{name:'Bolsas',emoji:'👜',bg:'bg-yellow-50',cat:'Moda'},{name:'Mochilas',emoji:'🎒',bg:'bg-pink-50',cat:'Moda'}]},
+    {title:'Games e diversão',link:'Ver todos',cat:'Games',items:[{name:'Consoles',emoji:'🎮',bg:'bg-indigo-50',cat:'Games'},{name:'Livros',emoji:'📖',bg:'bg-teal-50',cat:'Livros'},{name:'Futebol',emoji:'⚽',bg:'bg-green-50',cat:'Esportes'},{name:'Academia',emoji:'🏋️',bg:'bg-red-50',cat:'Esportes'}]}];
+
+  const query=ref(''),category=ref('Todos'),sort=ref('off'),maxPrice=ref(3000),onlyFav=ref(false),onlyOffer=ref(false);
+  const cart=ref(load('cart',[])),fav=ref(load('fav',[])),user=ref(load('user','')),cep=ref(load('cep',''));
+  const cartOpen=ref(false),sel=ref(null),qty=ref(1),loginOpen=ref(false),cepOpen=ref(false),ordered=ref('');
+  const nameIn=ref(''),cepIn=ref(''),toast=ref(''),bump=ref(false),sugOpen=ref(false);
+  const cur=ref(0),paused=ref(false),left=ref(3*3600+25*60);
+  let t1,t2,tt;
+
+  watch(cart,v=>save('cart',v),{deep:true}); watch(fav,v=>save('fav',v),{deep:true});
+
+  const norm=s=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  const filtered=computed(()=>{
+    let l=products.filter(p=>(category.value==='Todos'||p.cat===category.value)&&p.price<=maxPrice.value
+      &&norm(p.name+' '+p.cat).includes(norm(query.value))&&(!onlyFav.value||fav.value.includes(p.id))&&(!onlyOffer.value||p.old));
+    const s=sort.value; if(s==='asc')l=[...l].sort((a,b)=>a.price-b.price); if(s==='desc')l=[...l].sort((a,b)=>b.price-a.price); if(s==='rate')l=[...l].sort((a,b)=>b.rating-a.rating);
+    return l;});
+  const filtering=computed(()=>query.value||category.value!=='Todos'||onlyFav.value||onlyOffer.value);
+  const title=computed(()=>onlyFav.value?'Seus favoritos':onlyOffer.value?'Ofertas do Dia':query.value?`Resultados para "${query.value}"`:category.value==='Todos'?'Todos os produtos':category.value);
+  const suggestions=computed(()=>query.value.length>1?products.filter(p=>norm(p.name).includes(norm(query.value))).slice(0,5):[]);
+  const cartCount=computed(()=>cart.value.reduce((n,i)=>n+i.qty,0));
+  const cartTotal=computed(()=>cart.value.reduce((n,i)=>n+i.qty*i.price,0));
+  const countdown=computed(()=>[Math.floor(left.value/3600),Math.floor(left.value%3600/60),left.value%60].map(n=>String(n).padStart(2,'0')).join(':'));
+
+  const brl=v=>v.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+  const stars=r=>'★'.repeat(Math.round(r))+'☆'.repeat(5-Math.round(r));
+  const say=m=>{toast.value=m;clearTimeout(tt);tt=setTimeout(()=>toast.value='',2000)};
+  const goCatalog=()=>{sugOpen.value=false;nextTick(()=>document.getElementById('catalogo').scrollIntoView())};
+  const pick=c=>{category.value=c;onlyFav.value=onlyOffer.value=false;goCatalog()};
+  const reset=()=>{query.value='';category.value='Todos';sort.value='off';maxPrice.value=3000;onlyFav.value=onlyOffer.value=false;scrollTo({top:0})};
+  const closeSug=()=>setTimeout(()=>sugOpen.value=false,100);
+  const openProduct=p=>{sel.value=p;qty.value=1;sugOpen.value=false};
+  const add=(p,silent)=>{const f=cart.value.find(i=>i.id===p.id);f?f.qty++:cart.value.push({...p,qty:1});
+    bump.value=true;setTimeout(()=>bump.value=false,600);if(!silent)say('🛒 Adicionado ao carrinho')};
+  const addQty=()=>{const f=cart.value.find(i=>i.id===sel.value.id);f?f.qty+=qty.value:cart.value.push({...sel.value,qty:qty.value});say(`🛒 ${qty.value}x adicionado(s)`);sel.value=null};
+  const dec=i=>{i.qty>1?i.qty--:remove(i)};
+  const remove=i=>cart.value=cart.value.filter(x=>x.id!==i.id);
+  const isFav=p=>fav.value.includes(p.id);
+  const toggleFav=p=>{isFav(p)?fav.value=fav.value.filter(i=>i!==p.id):fav.value.push(p.id);say(isFav(p)?'❤️ Favoritado':'Removido dos favoritos')};
+  const login=()=>{if(!nameIn.value.trim())return;user.value=nameIn.value.trim().split(' ')[0];save('user',user.value);loginOpen.value=false;say(`Bem-vindo, ${user.value}!`)};
+  const logout=()=>{user.value='';save('user','');say('Você saiu da conta')};
+  const maskCep=()=>{let d=cepIn.value.replace(/\D/g,'').slice(0,8);cepIn.value=d.length>5?d.slice(0,5)+'-'+d.slice(5):d};
+  const saveCep=()=>{if(cepIn.value.length<9)return say('CEP inválido');cep.value=cepIn.value;save('cep',cep.value);cepOpen.value=false};
+  const checkout=()=>{if(!user.value){cartOpen.value=false;loginOpen.value=true;return say('Faça login para finalizar')}
+    ordered.value='#'+Math.floor(100000+Math.random()*900000);cart.value=[];cartOpen.value=false};
+  const step=d=>cur.value=(cur.value+d+slides.length)%slides.length;
+
+  onMounted(()=>{t1=setInterval(()=>{if(!paused.value)step(1)},5000);t2=setInterval(()=>left.value=left.value>0?left.value-1:86399,1000)});
+  onBeforeUnmount(()=>{clearInterval(t1);clearInterval(t2)});
+
+  return{categories,products,slides,cards,query,category,sort,maxPrice,onlyFav,onlyOffer,cart,fav,user,cep,cartOpen,sel,qty,loginOpen,cepOpen,ordered,
+    nameIn,cepIn,toast,bump,sugOpen,cur,paused,filtered,filtering,title,suggestions,cartCount,cartTotal,countdown,brl,stars,goCatalog,pick,reset,closeSug,
+    openProduct,add,addQty,dec,remove,isFav,toggleFav,login,logout,maskCep,saveCep,checkout,step,scrollTo:o=>window.scrollTo(o)};
+}}).mount('#app');
+</script>
+</body>
+</html>
